@@ -3,7 +3,7 @@ const Domain = require('../models/domain');
 
 const router = express.Router();
 
-function buildMaintenancePage() {
+function buildMaintenancePage(group = '') {
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -23,13 +23,12 @@ function buildMaintenancePage() {
 <body>
   <div class="box">
     <h2>// MAINTENANCE</h2>
-    <p>Layanan sedang dalam pemeliharaan<br>Coba beberapa saat lagi<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
+    <p>Layanan${group ? ' <b>' + group.toUpperCase() + '</b>' : ''} sedang dalam pemeliharaan<br>Coba beberapa saat lagi<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
   </div>
 </body>
 </html>`;
 }
 
-// ─── Helper: log redirect ─────────────────────────────────────────────────────
 function doRedirect(req, res, domain) {
   const userAgent = req.headers['user-agent'] || '';
   const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '';
@@ -37,54 +36,44 @@ function doRedirect(req, res, domain) {
   res.redirect(302, domain.url);
 }
 
-// ─── GET /:path — redirect via subdirectory/path ─────────────────────────────
-// Misal: domain-master.com/toko → redirect ke domain aktif
-// domain-master.com/ → 404
+// GET /:path — redirect via group/path
 router.get('/:path', (req, res, next) => {
   const { path } = req.params;
 
-  // Skip path internal (API, health, dll)
+  // Skip path internal
   if (['health', 'api', 'favicon.ico'].includes(path)) return next();
 
-  // Cari domain yang punya redirect_path matching
-  const domains = Domain.getActive();
-  
-  // Cari domain dengan path spesifik dulu
-  const matchedDomains = domains.filter(d => 
-    d.redirect_path && d.redirect_path.toLowerCase() === path.toLowerCase()
-  );
+  // Cari domain aktif berdasarkan group_name = path
+  const groupDomain = Domain.getRandomActiveByGroup(path);
+  if (groupDomain) return doRedirect(req, res, groupDomain);
 
-  // Kalau ada yang match path, redirect ke sana
-  if (matchedDomains.length > 0) {
-    const target = matchedDomains[Math.floor(Math.random() * matchedDomains.length)];
-    return doRedirect(req, res, target);
+  // Cek apakah group ada tapi semua domain-nya down/nawala
+  const groupDomains = Domain.getByGroup(path);
+  if (groupDomains.length > 0) {
+    return res.status(503).send(buildMaintenancePage(path));
   }
 
-  // Kalau tidak ada yang match tapi path = 'go' atau path default, redirect random
-  if (path === 'go' || path === 'l' || path === 'r' || path === 'link') {
+  // Path = go/l/r/link → redirect random dari semua group
+  if (['go', 'l', 'r', 'link'].includes(path)) {
     const domain = Domain.getRandomActive();
     if (!domain) return res.status(503).send(buildMaintenancePage());
     return doRedirect(req, res, domain);
   }
 
-  // Path lain → 404
+  // Path tidak dikenal → 404
   next();
 });
 
-// ─── GET / — root domain: kembalikan 404 / kosong ────────────────────────────
+// GET / — root kosong
 router.get('/', (req, res) => {
-  // Cek apakah ada query param ?go=1 atau ?r=1
   if (req.query.go || req.query.r || req.query.link) {
     const domain = Domain.getRandomActive();
     if (!domain) return res.status(503).send(buildMaintenancePage());
     return doRedirect(req, res, domain);
   }
-
-  // Default: root kosong
-  res.status(404).send(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>404</title>
-<style>body{font-family:monospace;background:#080b08;color:#2d4d2d;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-</style></head><body>404</body></html>`);
+  res.status(404).send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>404</title>
+<style>body{font-family:monospace;background:#080b08;color:#2d4d2d;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}</style>
+</head><body>404</body></html>`);
 });
 
 module.exports = router;

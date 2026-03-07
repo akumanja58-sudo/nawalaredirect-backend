@@ -89,11 +89,6 @@ const dbReadyPromise = initSqlJs().then(SQL => {
 
   saveDB();
   setInterval(saveDB, 30000);
-
-  // Migration
-  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch (e) { }
-  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch (e) { }
-
   console.log('✅ Database initialized');
   return dbInterface;
 });
@@ -106,3 +101,6 @@ const migrateDB = () => {
   try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch { }
   try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch { }
 };
+
+// Migration group_name
+try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch (e) { }
