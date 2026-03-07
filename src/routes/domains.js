@@ -2,7 +2,7 @@ const express = require('express');
 const Domain = require('../models/domain');
 const { checkDomain } = require('../services/healthCheck');
 const { checkAllDomains } = require('../services/healthCheck');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 const db = require('../models/database');
 
 const router = express.Router();
