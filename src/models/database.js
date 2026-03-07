@@ -98,8 +98,9 @@ module.exports.dbReadyPromise = dbReadyPromise;
 
 // Migration: tambah kolom baru kalau belum ada
 const migrateDB = () => {
-  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch { }
-  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch { }
+  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch (e) { }
+  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch (e) { }
+  try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch (e) { }
 };
 
 // Migration group_name
