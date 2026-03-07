@@ -87,6 +87,11 @@ const dbReadyPromise = initSqlJs().then(SQL => {
     ['max_fail_count', '3'], ['redirect_mode', 'random']
   ]) db.run('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)', [k, v]);
 
+  // Migration
+  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch (e) { }
+  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch (e) { }
+  try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch (e) { }
+
   saveDB();
   setInterval(saveDB, 30000);
   console.log('✅ Database initialized');
@@ -95,13 +100,3 @@ const dbReadyPromise = initSqlJs().then(SQL => {
 
 module.exports = dbInterface;
 module.exports.dbReadyPromise = dbReadyPromise;
-
-// Migration: tambah kolom baru kalau belum ada
-const migrateDB = () => {
-  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch (e) { }
-  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch (e) { }
-  try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch (e) { }
-};
-
-// Migration group_name
-try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch (e) { }
