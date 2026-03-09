@@ -1,7 +1,5 @@
 const db = require('./database');
 
-// Jalankan migration untuk kolom is_priority
-try { db.run('ALTER TABLE domains ADD COLUMN is_priority INTEGER DEFAULT 0'); } catch (e) { }
 
 const Domain = {
   getAll() {

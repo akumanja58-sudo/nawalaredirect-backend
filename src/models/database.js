@@ -87,10 +87,11 @@ const dbReadyPromise = initSqlJs().then(SQL => {
     ['max_fail_count', '3'], ['redirect_mode', 'random']
   ]) db.run('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)', [k, v]);
 
-  // Migration
-  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch (e) { }
-  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch (e) { }
-  try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch (e) { }
+  // Semua migrations di sini
+  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch { }
+  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch { }
+  try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch { }
+  try { db.run('ALTER TABLE domains ADD COLUMN is_priority INTEGER DEFAULT 0'); } catch { }
 
   saveDB();
   setInterval(saveDB, 30000);
