@@ -136,3 +136,49 @@ router.put('/:id/group', authMiddleware, (req, res) => {
 });
 
 module.exports = router;
+
+// GET /api/domains/stats/detailed — statistik detail untuk halaman stats
+router.get('/stats/detailed', authMiddleware, (req, res) => {
+  try {
+    const db = require('../models/database');
+
+    // Redirect per group
+    const redirectPerGroup = db.all(`
+      SELECT d.group_name, COUNT(r.id) as count
+      FROM redirect_logs r
+      JOIN domains d ON r.redirected_to = d.url
+      GROUP BY d.group_name
+      ORDER BY count DESC
+    `);
+
+    // Redirect per hari 7 hari terakhir
+    const redirectPerDay = db.all(`
+      SELECT date(created_at) as date, COUNT(*) as count
+      FROM redirect_logs
+      WHERE created_at >= date('now', '-7 days')
+      GROUP BY date(created_at)
+      ORDER BY date ASC
+    `);
+
+    // Top 5 domain
+    const topDomains = db.all(`
+      SELECT redirected_to, COUNT(*) as count
+      FROM redirect_logs
+      GROUP BY redirected_to
+      ORDER BY count DESC
+      LIMIT 5
+    `);
+
+    // Redirect per group per hari (7 hari terakhir)
+    const redirectGroupPerDay = db.all(`
+      SELECT date(r.created_at) as date, d.group_name, COUNT(*) as count
+      FROM redirect_logs r
+      JOIN domains d ON r.redirected_to = d.url
+      WHERE r.created_at >= date('now', '-7 days')
+      GROUP BY date(r.created_at), d.group_name
+      ORDER BY date ASC
+    `);
+
+    res.json({ success: true, redirectPerGroup, redirectPerDay, topDomains, redirectGroupPerDay });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
