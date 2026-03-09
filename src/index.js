@@ -39,8 +39,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 menit
-  max: 100,
+  windowMs: 15 * 60 * 1000,
+  max: 500,
   message: { success: false, error: 'Terlalu banyak request, coba lagi nanti' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -58,8 +58,8 @@ app.use('/api/domains', apiLimiter, domainRoutes);
 
 // Health check endpoint untuk Railway
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: Math.floor(process.uptime()),
   });
