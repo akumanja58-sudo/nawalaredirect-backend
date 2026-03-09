@@ -43,8 +43,8 @@ router.get('/:path', (req, res, next) => {
   // Skip path internal
   if (['health', 'api', 'favicon.ico'].includes(path)) return next();
 
-  // Cari domain aktif berdasarkan group_name = path
-  const groupDomain = Domain.getRandomActiveByGroup(path);
+  // Cari domain target berdasarkan group (prioritas → cadangan otomatis)
+  const groupDomain = Domain.getTargetByGroup(path);
   if (groupDomain) return doRedirect(req, res, groupDomain);
 
   // Cek apakah group ada tapi semua domain-nya down/nawala
@@ -53,9 +53,9 @@ router.get('/:path', (req, res, next) => {
     return res.status(503).send(buildMaintenancePage(path));
   }
 
-  // Path = go/l/r/link → redirect random dari semua group
+  // Path = go/l/r/link → redirect ke target global
   if (['go', 'l', 'r', 'link'].includes(path)) {
-    const domain = Domain.getRandomActive();
+    const domain = Domain.getTarget();
     if (!domain) return res.status(503).send(buildMaintenancePage());
     return doRedirect(req, res, domain);
   }
@@ -67,7 +67,7 @@ router.get('/:path', (req, res, next) => {
 // GET / — root kosong
 router.get('/', (req, res) => {
   if (req.query.go || req.query.r || req.query.link) {
-    const domain = Domain.getRandomActive();
+    const domain = Domain.getTarget();
     if (!domain) return res.status(503).send(buildMaintenancePage());
     return doRedirect(req, res, domain);
   }

@@ -182,3 +182,13 @@ router.get('/stats/detailed', authMiddleware, (req, res) => {
     res.json({ success: true, redirectPerGroup, redirectPerDay, topDomains, redirectGroupPerDay });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
+
+// POST /api/domains/:id/set-priority — jadikan domain ini prioritas group-nya
+router.post('/:id/set-priority', authMiddleware, (req, res) => {
+  try {
+    const domain = Domain.getById(req.params.id);
+    if (!domain) return res.status(404).json({ success: false, error: 'Domain tidak ditemukan' });
+    Domain.setPriority(domain.id, domain.group_name);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
