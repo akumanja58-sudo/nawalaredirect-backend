@@ -3,11 +3,12 @@ const Domain = require('../models/domain');
 const { checkDomain } = require('../services/healthCheck');
 const { checkAllDomains } = require('../services/healthCheck');
 const { authMiddleware } = require('../middleware/auth');
+const { checkDomainIndiwtf, checkAllDomainsIndiwtf } = require('../services/indiwtf');
 const db = require('../models/database');
 
 const router = express.Router();
 
-// GET /api/domains — semua domain
+// GET /api/domains
 router.get('/', authMiddleware, (req, res) => {
   try {
     const { group } = req.query;
@@ -25,7 +26,7 @@ router.get('/stats', authMiddleware, (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// GET /api/domains/groups — list semua group
+// GET /api/domains/groups
 router.get('/groups', authMiddleware, (req, res) => {
   try {
     const groups = Domain.getAllGroups();
@@ -42,7 +43,7 @@ router.get('/active', (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/domains — tambah domain
+// POST /api/domains
 router.post('/', authMiddleware, (req, res) => {
   try {
     const { url, label, group_name } = req.body;
@@ -53,7 +54,7 @@ router.post('/', authMiddleware, (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// PUT /api/domains/:id — update domain
+// PUT /api/domains/:id
 router.put('/:id', authMiddleware, (req, res) => {
   try {
     const result = Domain.update(req.params.id, req.body);
@@ -69,7 +70,7 @@ router.delete('/:id', authMiddleware, (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/domains/:id/check — manual check 1 domain
+// POST /api/domains/:id/check — basic check
 router.post('/:id/check', authMiddleware, async (req, res) => {
   try {
     const domain = Domain.getById(req.params.id);
@@ -87,39 +88,45 @@ router.post('/check-all', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/domains/:id/check-isp
+// POST /api/domains/:id/check-isp — cek via indiwtf
 router.post('/:id/check-isp', authMiddleware, async (req, res) => {
   try {
     const domain = Domain.getById(req.params.id);
     if (!domain) return res.status(404).json({ success: false, error: 'Domain tidak ditemukan' });
-    const { checkDomainIndiwtf } = require('../services/indiwtf');
-    const general = await checkDomainIndiwtf(domain);
-    db.run('UPDATE domains SET isp_status=?, updated_at=datetime(\'now\') WHERE id=?',
-      [JSON.stringify(general?.isp_results || {}), parseInt(req.params.id)]);
-    res.json({ success: true, general });
+
+    const result = await checkDomainIndiwtf(domain);
+    if (!result) return res.status(500).json({ success: false, error: 'Gagal cek indiwtf, periksa INDIWTF_TOKEN' });
+
+    const isBlocked = result.status === 'blocked';
+    const wasBlocked = domain.is_blocked === 1;
+
+    Domain.updateHealthCheck(domain.id, {
+      isBlocked,
+      statusCode: isBlocked ? 403 : 200,
+      responseTime: null,
+      error: null,
+      forceBlocked: true,
+    });
+
+    // Kirim notif kalau baru diblokir
+    if (isBlocked && !wasBlocked) {
+      const { notifyDomainBlocked } = require('../services/telegram');
+      await notifyDomainBlocked(domain);
+    }
+
+    res.json({ success: true, status: result.status, isBlocked, domain: result.domain });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // POST /api/domains/check-all-isp
 router.post('/check-all-isp', authMiddleware, async (req, res) => {
   try {
-    const { checkAllDomainsIndiwtf } = require('../services/indiwtf');
     const results = await checkAllDomainsIndiwtf();
     res.json({ success: true, results });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// PUT /api/domains/:id/path
-router.put('/:id/path', authMiddleware, (req, res) => {
-  try {
-    const { path } = req.body;
-    db.run('UPDATE domains SET redirect_path=?, updated_at=datetime(\'now\') WHERE id=?',
-      [path || '', parseInt(req.params.id)]);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// PUT /api/domains/:id/group — set group domain
+// PUT /api/domains/:id/group
 router.put('/:id/group', authMiddleware, (req, res) => {
   try {
     const { group_name } = req.body;
