@@ -3,7 +3,7 @@ const Domain = require('../models/domain');
 const { checkDomain } = require('../services/healthCheck');
 const { checkAllDomains } = require('../services/healthCheck');
 const { authMiddleware } = require('../middleware/auth');
-const { checkDomainIndiwtf, checkAllDomainsIndiwtf } = require('../services/indiwtf');
+const { checkDomainFull, checkAllDomainsIndiwtf } = require('../services/indiwtf');
 const db = require('../models/database');
 
 const router = express.Router();
@@ -88,33 +88,15 @@ router.post('/check-all', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// POST /api/domains/:id/check-isp — cek via indiwtf
+// POST /api/domains/:id/check-isp — cek via TrustPositif + indiwtf
 router.post('/:id/check-isp', authMiddleware, async (req, res) => {
   try {
     const domain = Domain.getById(req.params.id);
     if (!domain) return res.status(404).json({ success: false, error: 'Domain tidak ditemukan' });
 
-    const result = await checkDomainIndiwtf(domain);
-    if (!result) return res.status(500).json({ success: false, error: 'Gagal cek indiwtf, periksa INDIWTF_TOKEN' });
-
-    const isBlocked = result.status === 'blocked';
-    const wasBlocked = domain.is_blocked === 1;
-
-    Domain.updateHealthCheck(domain.id, {
-      isBlocked,
-      statusCode: isBlocked ? 403 : 200,
-      responseTime: null,
-      error: null,
-      forceBlocked: true,
-    });
-
-    // Kirim notif kalau baru diblokir
-    if (isBlocked && !wasBlocked) {
-      const { notifyDomainBlocked } = require('../services/telegram');
-      await notifyDomainBlocked(domain);
-    }
-
-    res.json({ success: true, status: result.status, isBlocked, domain: result.domain });
+    // checkDomainFull: TrustPositif dulu → kalau aman → indiwtf
+    const result = await checkDomainFull(domain);
+    res.json({ success: true, status: result.status, isBlocked: result.isBlocked, source: result.source });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 

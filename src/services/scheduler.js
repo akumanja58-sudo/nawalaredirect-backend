@@ -1,22 +1,17 @@
 const cron = require('node-cron');
-const { checkAllDomains } = require('./healthCheck');
 const { checkAllDomainsIndiwtf } = require('./indiwtf');
+const { refreshBlocklist } = require('./trustpositif');
 const { sendDomainReport } = require('./telegram');
 const Domain = require('../models/domain');
 
-let jobs = [];
-let previousBlockedIds = new Set();
+let healthCheckJob = null;
+let reportJob = null;
+let trustpositifJob = null;
 
 async function runHealthCheck() {
   try {
-    // Kalau ada INDIWTF_TOKEN, pakai indiwtf. Kalau tidak, fallback ke basic check
-    if (process.env.INDIWTF_TOKEN) {
-      console.log('🔍 Running indiwtf health check...');
-      await checkAllDomainsIndiwtf();
-    } else {
-      console.log('🔍 Running basic health check...');
-      await checkAllDomains();
-    }
+    console.log('🔍 Running indiwtf health check...');
+    await checkAllDomainsIndiwtf();
   } catch (err) {
     console.error('❌ Health check error:', err.message);
   }
@@ -27,36 +22,46 @@ function startSchedulers() {
   const reportInterval = parseInt(process.env.REPORT_INTERVAL || '4');
 
   // Health check setiap X menit
-  jobs.push(cron.schedule(`*/${healthInterval} * * * *`, () => {
-    console.log(`⏰ [CRON] Health check...`);
+  healthCheckJob = cron.schedule(`*/${healthInterval} * * * *`, () => {
+    console.log(`⏰ [CRON] Health check jalan...`);
     runHealthCheck();
-  }));
+  });
+
+  // Refresh TrustPositif blocklist tiap 6 jam
+  trustpositifJob = cron.schedule('0 */6 * * *', () => {
+    console.log('🔄 [CRON] Refresh TrustPositif blocklist...');
+    refreshBlocklist();
+  });
 
   // Report Telegram setiap X jam
   const hours = [];
   for (let h = 0; h < 24; h += reportInterval) {
     hours.push((h - 7 + 24) % 24);
   }
-  jobs.push(cron.schedule(`0 ${hours.join(',')} * * *`, () => {
-    console.log(`📤 [CRON] Kirim report...`);
+  reportJob = cron.schedule(`0 ${hours.join(',')} * * *`, () => {
+    console.log(`📤 [CRON] Kirim report Telegram...`);
     sendDomainReport();
-  }));
+  });
 
-  const mode = process.env.INDIWTF_TOKEN ? 'indiwtf (Indonesia-accurate)' : 'basic';
   console.log(`✅ Scheduler aktif:`);
-  console.log(`   - Health check: setiap ${healthInterval} menit [${mode}]`);
+  console.log(`   - Health check: setiap ${healthInterval} menit [TrustPositif + indiwtf]`);
+  console.log(`   - TrustPositif refresh: setiap 6 jam`);
   console.log(`   - Report Telegram: setiap ${reportInterval} jam`);
 
-  // Initial check setelah 5 detik
-  setTimeout(() => {
+  // Download TrustPositif blocklist saat startup
+  setTimeout(async () => {
+    console.log('📥 Download TrustPositif blocklist...');
+    await refreshBlocklist();
     console.log('🚀 Initial health check...');
     runHealthCheck();
   }, 5000);
 }
 
 function stopSchedulers() {
-  jobs.forEach(j => j.stop());
-  jobs = [];
+  if (healthCheckJob) healthCheckJob.stop();
+  if (reportJob) reportJob.stop();
+  if (trustpositifJob) trustpositifJob.stop();
+  console.log('⏹️  Schedulers stopped');
 }
 
 module.exports = { startSchedulers, stopSchedulers, runHealthCheck };
