@@ -86,18 +86,15 @@ async function notifyDomainBlocked(domain) {
   let newPriority = null;
   if (group) {
     newPriority = Domain.getPriorityByGroup(group);
-    // Kalau yang ketemu masih domain yang sama, skip
     if (newPriority && newPriority.id === domain.id) newPriority = null;
   }
 
-  let message = `🚨 <b>DOMAIN DIBLOKIR NAWALA!</b>\n\n`
-    + `🌐 ${domain.url}${label}\n`
-    + `⏰ ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB\n\n`
-    + `Domain tersebut sudah dihapus dari rotasi redirect otomatis.\n`;
+  let message = `⚠️ <b>ATTENTION</b>\n\n`
+    + `Domain Nawala <b>${domain.url}</b>${label} sudah dihapus dari rotasi redirect otomatis\n`;
 
   if (newPriority) {
-    message += `🔄 <b>Prioritas baru: ${newPriority.url}</b>`;
-    if (newPriority.label) message += ` [${newPriority.label}]`;
+    const newLabel = newPriority.label ? ` [${newPriority.label}]` : '';
+    message += `🔄 Prioritas baru: <b>${newPriority.url}</b>${newLabel}`;
   } else {
     message += `⚠️ Tidak ada domain cadangan aktif!`;
   }
