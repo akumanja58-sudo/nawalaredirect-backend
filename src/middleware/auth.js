@@ -1,15 +1,13 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_change_this';
+const SESSION_TIMEOUT = 60 * 60; // 1 jam dalam detik
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ 
-      success: false, 
-      error: 'Token tidak ditemukan' 
-    });
+    return res.status(401).json({ success: false, error: 'Token tidak ditemukan' });
   }
 
   const token = authHeader.split(' ')[1];
@@ -19,15 +17,12 @@ function authMiddleware(req, res, next) {
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(401).json({ 
-      success: false, 
-      error: 'Token tidak valid atau sudah expired' 
-    });
+    return res.status(401).json({ success: false, error: 'Token tidak valid atau sudah expired' });
   }
 }
 
 function generateToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: SESSION_TIMEOUT });
 }
 
 module.exports = { authMiddleware, generateToken };
