@@ -1,103 +1,112 @@
-const initSqlJs = require('sql.js');
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/nawala.db');
-const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
 
-let db = null;
-
-function saveDB() {
-  if (!db) return;
+async function query(sql, params = []) {
+  const client = await pool.connect();
   try {
-    const data = db.export();
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
-  } catch (e) { console.error('Save DB error:', e.message); }
+    const res = await client.query(sql, params);
+    return res;
+  } finally {
+    client.release();
+  }
 }
 
+// Wrapper mirip sql.js biar ga perlu ubah banyak di domain.js
 function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  // Convert ? ke $1, $2, dst (PostgreSQL style)
+  let i = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+  return query(pgSql, params).then(r => r.rows);
 }
 
 function get(sql, params = []) {
-  return all(sql, params)[0] || null;
+  return all(sql, params).then(rows => rows[0] || null);
 }
 
 function run(sql, params = []) {
-  db.run(sql, params);
-  saveDB();
-  return { lastInsertRowid: get('SELECT last_insert_rowid() as id')?.id };
+  let i = 0;
+  const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+  // Convert sqlite datetime() ke PostgreSQL NOW()
+  const finalSql = pgSql
+    .replace(/datetime\('now'\)/gi, 'NOW()')
+    .replace(/date\('now'\)/gi, 'CURRENT_DATE')
+    .replace(/date\(created_at\)/gi, 'DATE(created_at)')
+    .replace(/date\(r\.created_at\)/gi, 'DATE(r.created_at)');
+  return query(finalSql, params).then(r => ({
+    lastInsertRowid: r.rows[0]?.id || null,
+  }));
 }
 
 function getSetting(key) {
-  return get('SELECT value FROM settings WHERE key = ?', [key])?.value || null;
+  return get('SELECT value FROM settings WHERE key = $1', [key]).then(r => r?.value || null);
 }
 
 const dbInterface = { all, get, run, getSetting };
 
-const dbReadyPromise = initSqlJs().then(SQL => {
-  db = fs.existsSync(DB_PATH)
-    ? new SQL.Database(fs.readFileSync(DB_PATH))
-    : new SQL.Database();
+// Init tables
+const dbReadyPromise = (async () => {
+  console.log('🔄 Connecting to PostgreSQL...');
 
-  db.run(`
+  await query(`
     CREATE TABLE IF NOT EXISTS domains (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       url TEXT NOT NULL UNIQUE,
       label TEXT DEFAULT '',
       is_active INTEGER DEFAULT 1,
       is_blocked INTEGER DEFAULT 0,
-      last_checked TEXT,
+      is_priority INTEGER DEFAULT 0,
+      last_checked TIMESTAMP,
       last_status_code INTEGER,
       response_time INTEGER,
       fail_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      isp_status TEXT,
+      redirect_path TEXT DEFAULT '',
+      group_name TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
     );
+
     CREATE TABLE IF NOT EXISTS redirect_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       redirected_to TEXT NOT NULL,
       user_agent TEXT,
       ip_address TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMP DEFAULT NOW()
     );
+
     CREATE TABLE IF NOT EXISTS health_check_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       domain_id INTEGER,
       status TEXT,
       status_code INTEGER,
       response_time INTEGER,
       error_message TEXT,
-      checked_at TEXT DEFAULT (datetime('now'))
+      checked_at TIMESTAMP DEFAULT NOW()
     );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
   `);
 
-  for (const [k, v] of [
-    ['health_check_interval', '30'], ['report_interval', '4'],
-    ['max_fail_count', '3'], ['redirect_mode', 'random']
-  ]) db.run('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)', [k, v]);
+  // Insert default settings
+  await query(`
+    INSERT INTO settings (key, value) VALUES
+      ('health_check_interval', '30'),
+      ('report_interval', '4'),
+      ('max_fail_count', '3'),
+      ('redirect_mode', 'random')
+    ON CONFLICT (key) DO NOTHING;
+  `);
 
-  // Semua migrations di sini
-  try { db.run('ALTER TABLE domains ADD COLUMN isp_status TEXT'); } catch { }
-  try { db.run('ALTER TABLE domains ADD COLUMN redirect_path TEXT DEFAULT ""'); } catch { }
-  try { db.run('ALTER TABLE domains ADD COLUMN group_name TEXT DEFAULT ""'); } catch { }
-  try { db.run('ALTER TABLE domains ADD COLUMN is_priority INTEGER DEFAULT 0'); } catch { }
-
-  saveDB();
-  setInterval(saveDB, 30000);
-  console.log('✅ Database initialized');
+  console.log('✅ Database initialized (PostgreSQL)');
   return dbInterface;
-});
+})();
 
 module.exports = dbInterface;
 module.exports.dbReadyPromise = dbReadyPromise;
