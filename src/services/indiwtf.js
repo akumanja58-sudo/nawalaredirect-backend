@@ -1,52 +1,85 @@
-const express = require('express');
+const axios = require('axios');
 const Domain = require('../models/domain');
+const { notifyDomainBlocked, notifyAllDomainsDown } = require('./telegram');
+const { checkDomainTrustPositif, checkDomainsBatch } = require('./trustpositif');
 
-const router = express.Router();
+const INDIWTF_TOKEN = process.env.INDIWTF_TOKEN;
+const BASE_URL = 'https://indiwtf.com/api';
 
-function buildMaintenancePage(group = '') {
-  return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Maintenance</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:monospace;background:#080b08;color:#c8ffc8;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.box{max-width:400px;padding:2rem}h2{color:#00ff41;margin-bottom:1rem;font-size:1.2rem;letter-spacing:3px}p{color:#5a8a5a;font-size:.85rem;line-height:1.8}.dot{animation:blink 1.4s infinite}.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}@keyframes blink{0%,80%,100%{opacity:0}40%{opacity:1}}</style>
-</head><body><div class="box"><h2>// MAINTENANCE</h2><p>Layanan${group ? ' <b>' + group.toUpperCase() + '</b>' : ''} sedang dalam pemeliharaan<br>Coba beberapa saat lagi<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p></div></body></html>`;
-}
-
-async function doRedirect(req, res, domain) {
-  const userAgent = req.headers['user-agent'] || '';
-  const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '';
-  await Domain.logRedirect(domain.url, userAgent, ip);
-  res.redirect(302, domain.url);
-}
-
-router.get('/:path', async (req, res, next) => {
-  const { path } = req.params;
-  if (['health', 'api', 'favicon.ico'].includes(path)) return next();
+async function checkDomainIndiwtf(domain) {
+  if (!INDIWTF_TOKEN) return null;
   try {
-    const groupDomain = await Domain.getTargetByGroup(path);
-    if (groupDomain) return doRedirect(req, res, groupDomain);
+    const cleanDomain = domain.url.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')[0];
+    const res = await axios.get(`${BASE_URL}/check`, { params: { domain: cleanDomain, token: INDIWTF_TOKEN }, timeout: 15000 });
+    return { domain: cleanDomain, ...res.data };
+  } catch (err) { console.error(`❌ Indiwtf error for ${domain.url}:`, err.message); return null; }
+}
 
-    const groupDomains = await Domain.getByGroup(path);
-    if (groupDomains.length > 0) return res.status(503).send(buildMaintenancePage(path));
+async function checkDomainFull(domain) {
+  console.log(`🔍 [CHECK] ${domain.url}`);
+  const isTrustPositif = await checkDomainTrustPositif(domain.url);
+  if (isTrustPositif) {
+    console.log(`🚫 [TRUSTPOSITIF] ${domain.url} NAWALA!`);
+    const wasBlocked = domain.is_blocked === 1;
+    await Domain.updateHealthCheck(domain.id, { isBlocked: true, statusCode: 403, responseTime: null, error: null, forceBlocked: true });
+    if (!wasBlocked) await notifyDomainBlocked(domain);
+    return { source: 'trustpositif', status: 'blocked', isBlocked: true };
+  }
+  console.log(`✅ [TRUSTPOSITIF] ${domain.url} aman, double cek indiwtf...`);
+  const result = await checkDomainIndiwtf(domain);
+  if (!result) return { source: 'trustpositif', status: 'allowed', isBlocked: false };
+  const isBlocked = result.status === 'blocked';
+  const wasBlocked = domain.is_blocked === 1;
+  await Domain.updateHealthCheck(domain.id, { isBlocked, statusCode: isBlocked ? 403 : 200, responseTime: null, error: null, forceBlocked: true });
+  if (isBlocked && !wasBlocked) await notifyDomainBlocked(domain);
+  return { source: 'indiwtf', status: result.status, isBlocked };
+}
 
-    if (['go', 'l', 'r', 'link'].includes(path)) {
-      const domain = await Domain.getTarget();
-      if (!domain) return res.status(503).send(buildMaintenancePage());
-      return doRedirect(req, res, domain);
+async function checkAllDomainsIndiwtf() {
+  const allDomains = await Domain.getAll(); // await karena PostgreSQL async
+  const domains = allDomains.filter(d => d.is_active === 1);
+  if (!domains.length) return [];
+  console.log(`🔍 [HEALTH CHECK] ${domains.length} domains...`);
+
+  const tpResults = await checkDomainsBatch(domains.map(d => d.url));
+  const results = [], needIndiwtf = [];
+
+  for (const domain of domains) {
+    const clean = domain.url.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')[0].toLowerCase();
+    if (tpResults.get(clean) === true) {
+      console.log(`🚫 [TRUSTPOSITIF] ${domain.url} nawala!`);
+      const wasBlocked = domain.is_blocked === 1;
+      await Domain.updateHealthCheck(domain.id, { isBlocked: true, statusCode: 403, responseTime: null, error: null, forceBlocked: true });
+      if (!wasBlocked) await notifyDomainBlocked(domain);
+      results.push({ ...domain, isBlocked: true, source: 'trustpositif' });
+    } else {
+      needIndiwtf.push(domain);
     }
-    next();
-  } catch (err) {
-    console.error('Redirect error:', err.message);
-    next();
   }
-});
 
-router.get('/', async (req, res) => {
-  if (req.query.go || req.query.r || req.query.link) {
-    try {
-      const domain = await Domain.getTarget();
-      if (!domain) return res.status(503).send(buildMaintenancePage());
-      return doRedirect(req, res, domain);
-    } catch { return res.status(503).send(buildMaintenancePage()); }
+  if (INDIWTF_TOKEN && needIndiwtf.length) {
+    for (const domain of needIndiwtf) {
+      const result = await checkDomainIndiwtf(domain);
+      if (!result) { results.push({ ...domain, isBlocked: false, source: 'trustpositif' }); continue; }
+      const isBlocked = result.status === 'blocked';
+      const wasBlocked = domain.is_blocked === 1;
+      await Domain.updateHealthCheck(domain.id, { isBlocked, statusCode: isBlocked ? 403 : 200, responseTime: null, error: null, forceBlocked: true });
+      if (isBlocked && !wasBlocked) await notifyDomainBlocked(domain);
+      results.push({ ...domain, isBlocked, source: 'indiwtf' });
+      await new Promise(r => setTimeout(r, 800));
+    }
+  } else {
+    for (const domain of needIndiwtf) {
+      await Domain.updateHealthCheck(domain.id, { isBlocked: false, statusCode: 200, responseTime: null, error: null, forceBlocked: false });
+      results.push({ ...domain, isBlocked: false, source: 'trustpositif' });
+    }
   }
-  res.status(404).send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>404</title><style>body{font-family:monospace;background:#080b08;color:#2d4d2d;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}</style></head><body>404</body></html>`);
-});
 
-module.exports = router;
+  const activeList = await Domain.getActive();
+  if (activeList.length === 0 && domains.length > 0) await notifyAllDomainsDown();
+  const blocked = results.filter(r => r.isBlocked).length;
+  console.log(`✅ [HEALTH CHECK] Selesai: ${results.length - blocked} OK | ${blocked} Blocked`);
+  return results;
+}
+
+module.exports = { checkDomainIndiwtf, checkDomainFull, checkAllDomainsIndiwtf };
