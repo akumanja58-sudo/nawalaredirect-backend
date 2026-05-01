@@ -85,7 +85,7 @@ async function notifyDomainBlocked(domain) {
   // Cari prioritas baru setelah domain ini diblokir
   let newPriority = null;
   if (group) {
-    newPriority = Domain.getPriorityByGroup(group);
+    newPriority = await Domain.getPriorityByGroup(group);
     if (newPriority && newPriority.id === domain.id) newPriority = null;
   }
 
