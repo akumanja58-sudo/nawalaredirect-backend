@@ -22,8 +22,8 @@ async function sendMessage(text) {
 }
 
 async function sendDomainReport() {
-  const stats = Domain.getStats();
-  const domains = Domain.getAll();
+  const stats = await Domain.getStats();
+  const domains = await Domain.getAll();
 
   const activeDomains = domains.filter(d => d.is_active === 1 && d.is_blocked === 0);
   const blockedDomains = domains.filter(d => d.is_blocked === 1);
